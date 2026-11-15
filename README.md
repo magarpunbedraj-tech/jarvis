@@ -41,6 +41,8 @@ Example values are placeholders in .env.example. Don't assume a model is free ju
 - POST /api/tasks {title, description, agent, priority}
 - POST /api/tasks/{id}/run
 - POST /api/agent-message {from_agent,to_agent,content,task_id}
+- GET/POST/PATCH/DELETE /api/schedules (daily Nepal-time jobs)
+- POST /api/worker/action (local approval-gated Windows/browser relay; worker must be running)
 
 ## Local real-world browser / Windows actions (approval-gated)
 1. In .env, set WORKER_TOKEN to a long random secret (same value is used by API and worker; never share it).
