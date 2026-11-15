@@ -30,6 +30,19 @@ async def health(): return {"ok":True,"worker":"local","host":HOST,"port":PORT,"
 async def action(a:Action):
  auth(a.token)
  if not a.approved: raise HTTPException(403,"Human approval required. Set approved=true only after explicit user confirmation.")
+ if a.action=="browse_page":
+  if not a.target.startswith(("https://","http://")): raise HTTPException(400,"Only http(s) URLs allowed")
+  try:
+   from playwright.async_api import async_playwright
+   async with async_playwright() as pw:
+    browser=await pw.chromium.launch(headless=True)
+    page=await browser.new_page()
+    await page.goto(a.target,wait_until="domcontentloaded",timeout=30000)
+    title=await page.title()
+    page_text=(await page.locator("body").inner_text())[:12000]
+    await browser.close()
+    return {"ok":True,"url":a.target,"title":title,"text":page_text}
+  except Exception as e: raise HTTPException(500,"Browser failed: "+str(e)[:400])
  if a.action=="open_url":
   if not a.target.startswith(("https://","http://")): raise HTTPException(400,"Only http(s) URLs allowed")
   webbrowser.open(a.target);return {"ok":True,"action":a.action,"target":a.target}
