@@ -42,19 +42,14 @@ Example values are placeholders in .env.example. Don't assume a model is free ju
 - POST /api/tasks/{id}/run
 - POST /api/agent-message {from_agent,to_agent,content,task_id}
 
+## Local real-world browser / Windows actions (approval-gated)
+1. In .env, set WORKER_TOKEN to a long random secret (same value is used by API and worker; never share it).
+2. Run start-windows.bat in terminal 1 (API/dashboard).
+3. Run worker-start.bat in terminal 2 (local Windows worker).
+4. In dashboard → Real-world browser & Windows actions, choose Start browser, then navigate. Fill/click/read require a CSS selector and a confirmation prompt for each action.
+5. Install Chromium once: python -m playwright install chromium (inside activated .venv).
+
+Worker is bound to 127.0.0.1 by default and only accepts an allowlisted action with the secret token and explicit approval. File operations are confined to this repository folder; app launches are limited to Notepad/Calculator/Paint. Browser interaction can affect real websites: verify URL, selector, and data before approving. Never approve payment, account deletion, sending messages, purchases, or other irreversible actions without carefully reviewing the exact operation. This is not a fully autonomous desktop agent and does not bypass logins, CAPTCHA, MFA, or website protections.
+
 ## Honest capability boundaries
-This is a multi-agent orchestration and chat MVP. Browser/computer agents currently reason and prepare workflows; they do not actually click, navigate authenticated websites, or run arbitrary commands. Scheduled recurring tasks, real local browser/computer workers, approvals, and voice I/O are subsequent modules. Do not expose the server publicly without authentication. Keep it bound to 127.0.0.1.
-
-
-## New v0.3 local worker + daily schedules
-- Dashboard includes daily schedule creation, pause/enable and delete controls (Asia/Kathmandu time).
-- Scheduler runs each enabled schedule once per Nepal calendar day and sends its prompt through the manager's multi-agent orchestration. It is opt-in; nothing is scheduled automatically.
-- Start the local execution worker separately: `worker-start.bat`.
-- Worker binds to 127.0.0.1:8788, requires WORKER_TOKEN and explicit `approved=true` for each action.
-- Allowlisted actions: open URL, open selected apps (Notepad/Calculator/Paint), read/write/list files inside project root, open project folders, and approved Playwright page inspection.
-- Browser inspection requires Playwright browser installation: run `python -m playwright install chromium`.
-- Worker endpoints: GET `/health`, POST `/action`. Example body: `{"token":"YOUR_SECRET","action":"browse_page","target":"https://example.com","approved":true}`.
-- Worker is separate from the AI backend; model output cannot silently execute OS actions. Never expose worker port publicly or send its token to a model.
-
-## Safety/limitations
-This is still a local MVP. Schedule tasks are AI-generated reports/plans, not guaranteed unattended external actions. Browser page inspection is read-only; it does not log into accounts, click purchases, or submit forms. File actions are confined to project directory. Review/approve every worker action.
+Multi-agent planning still uses LLM-generated plans and can make mistakes. Scheduled jobs run locally only while the API process is open and need a configured provider; provider quotas and availability are external. The worker/dashboard are not publicly hosted and the laptop must remain awake and connected for local actions.
