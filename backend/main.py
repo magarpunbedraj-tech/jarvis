@@ -11,7 +11,7 @@ load_dotenv()
 ROOT=Path(__file__).resolve().parent.parent
 DATA=ROOT/"data"; DATA.mkdir(exist_ok=True)
 TASKS_FILE=DATA/"tasks.json"; EVENTS_FILE=DATA/"events.jsonl"
-app=FastAPI(title="Jarvis AI Agency",version="0.3.0")
+app=FastAPI(title="Jarvis AI Agency",version="0.4.0")
 app.mount("/static",StaticFiles(directory=str(ROOT/"web")),name="static")
 from .scheduler import router as schedule_router, start_scheduler
 app.include_router(schedule_router)
@@ -244,7 +244,7 @@ async def computer_execute(body:ComputerExecuteIn):
   results.append(await worker_action(action))
  return {"ok":True,"results":results}
 @app.get("/api/config")
-async def config():return {"provider":"cloud" if providers() else "ollama","model":providers()[0]["model"] if providers() else os.getenv("OLLAMA_MODEL","qwen2.5:7b"),"desktop_control":False}
+async def config():return {"provider":"cloud" if providers() else "ollama","model":providers()[0]["model"] if providers() else os.getenv("OLLAMA_MODEL","qwen2.5:7b"),"desktop_control":bool(os.getenv("WORKER_TOKEN")),"vision_configured":bool(os.getenv("GEMINI_API_KEY") or providers())}
 @app.post("/api/orchestrate")
 async def orchestrate(body:ChatIn):
  planner="Return JSON only {steps:[{agent:research|coder|browser|business|computer|qa|memory|voice,task:string}]}. Choose 2-5 distinct specialists for goal: "+body.message
