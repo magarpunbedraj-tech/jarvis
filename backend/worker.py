@@ -50,7 +50,7 @@ async def action(a:Action):
    p.parent.mkdir(parents=True,exist_ok=True);p.write_text(a.content,encoding="utf8");return {"ok":True,"path":str(p.relative_to(ROOT))}
   if a.action=="list_folder":
    if not p.is_dir():raise HTTPException(404,"Folder not found")
-   return {"ok":True,"items":[{"name":x.name,"directory":x.is_dir()} for x in list(p.iterdir())[:200]}
+   return {"ok":True,"items":[{"name":x.name,"directory":x.is_dir()} for x in list(p.iterdir())[:200]]}
   if a.action=="open_folder":
    if not p.is_dir():raise HTTPException(404,"Folder not found")
    os.startfile(str(p));return {"ok":True,"path":str(p)}
