@@ -6,7 +6,6 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from .main import orchestrate, ChatIn, event
 router=APIRouter(prefix="/api/schedules",tags=["schedules"])
 FILE=Path(__file__).resolve().parent.parent/"data"/"schedules.json"
 TZ="Asia/Kathmandu"
@@ -37,6 +36,7 @@ async def delete(sid:str):
  if len(n)==len(a):raise HTTPException(404,"Schedule not found")
  save(n);return {"ok":True}
 async def run_due():
+ from .main import orchestrate, ChatIn, event
  now=datetime.now(ZoneInfo(TZ));today=now.date().isoformat()
  for s in load():
   if not s.get("enabled") or s.get("last_run_date")==today:continue
