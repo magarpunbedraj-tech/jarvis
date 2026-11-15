@@ -54,7 +54,12 @@ class WorkerAction(BaseModel):
  amount:int=0
  keys:list[str]=[]
 
-def read_tasks():
+class ComputerPlanIn(BaseModel):
+ goal:str
+class ComputerExecuteIn(BaseModel):
+ actions:list[WorkerAction]
+ approved:bool=False
+\ndef read_tasks():
  try:return json.loads(TASKS_FILE.read_text(encoding="utf8"))
  except:return []
 def write_tasks(x):TASKS_FILE.write_text(json.dumps(x,indent=2,ensure_ascii=False),encoding="utf8")
@@ -157,6 +162,23 @@ async def worker_action(body:WorkerAction):
    if r.status_code>=400:raise HTTPException(r.status_code,r.text[:800])
    return r.json()
  except httpx.RequestError as e:raise HTTPException(503,"Local worker unavailable. Start worker-start.bat. "+str(e)[:200])
+@app.post("/api/computer/plan")
+async def computer_plan(body:ComputerPlanIn):
+ prompt="Create a cautious PC workflow for this goal: "+body.goal+"\\nReturn JSON only: {steps:[{action:launch_app|desktop_hotkey|desktop_type|desktop_scroll|browser_navigate|browser_fill|browser_click,target:string,keys:[...],content:string,selector:string,amount:int}]}\\nOnly propose reversible steps. Never propose payments, purchases, deletion, account changes, sending messages, or entering passwords/OTP. Use exact Start Menu app names if known. Do not claim actions executed."
+ raw=await llm([{"role":"system","content":"Windows automation planner. JSON only."},{"role":"user","content":prompt}])
+ try:
+  obj=json.loads(raw[raw.find("{"):raw.rfind("}")+1]);return {"goal":body.goal,"steps":obj.get("steps",[])[:12],"status":"proposal_only"}
+ except Exception as e:raise HTTPException(502,"Could not parse computer plan: "+str(e)[:250])
+@app.post("/api/computer/execute")
+async def computer_execute(body:ComputerExecuteIn):
+ if not body.approved:raise HTTPException(403,"Human approval required for entire PC plan")
+ if len(body.actions)>12:raise HTTPException(413,"Maximum 12 actions per plan")
+ results=[]
+ for action in body.actions:
+  if action.action not in {"launch_app","desktop_hotkey","desktop_type","desktop_scroll","browser_navigate","browser_fill","browser_click","desktop_click"}:raise HTTPException(400,"Action not allowlisted for agent plans")
+  action.approved=True
+  results.append(await worker_action(action))
+ return {"ok":True,"results":results}
 @app.get("/api/config")
 async def config():return {"provider":"cloud" if providers() else "ollama","model":providers()[0]["model"] if providers() else os.getenv("OLLAMA_MODEL","qwen2.5:7b"),"desktop_control":False}
 @app.post("/api/orchestrate")
