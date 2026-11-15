@@ -168,15 +168,30 @@ async def computer_plan(body:ComputerPlanIn):
  prompt="Create a cautious PC workflow for this goal: "+body.goal+"\\nReturn JSON only: {steps:[{action:launch_app|desktop_hotkey|desktop_type|desktop_scroll|browser_navigate|browser_fill|browser_click,target:string,keys:[...],content:string,selector:string,amount:int}]}\\nOnly propose reversible steps. Never propose payments, purchases, deletion, account changes, sending messages, or entering passwords/OTP. Use exact Start Menu app names if known. Do not claim actions executed."
  raw=await llm([{"role":"system","content":"Windows automation planner. JSON only."},{"role":"user","content":prompt}])
  try:
-  obj=json.loads(raw[raw.find("{"):raw.rfind("}")+1]);return {"goal":body.goal,"steps":obj.get("steps",[])[:12],"status":"proposal_only"}
+  obj=json.loads(raw[raw.find("{"):raw.rfind("}")+1])
+  allowed={"launch_app","desktop_hotkey","desktop_type","desktop_scroll","browser_navigate","browser_fill","browser_click","desktop_click"}
+  steps=obj.get("steps",[])
+  if not isinstance(steps,list):raise ValueError("steps must be a list")
+  clean=[]
+  for step in steps[:12]:
+   if not isinstance(step,dict) or step.get("action") not in allowed:continue
+   clean.append({k:step.get(k) for k in ("action","target","selector","content","keys","amount") if k in step})
+  return {"goal":body.goal,"steps":clean,"status":"proposal_only"}
  except Exception as e:raise HTTPException(502,"Could not parse computer plan: "+str(e)[:250])
 @app.post("/api/computer/execute")
 async def computer_execute(body:ComputerExecuteIn):
  if not body.approved:raise HTTPException(403,"Human approval required for entire PC plan")
+ if not body.actions:raise HTTPException(400,"No actions supplied")
  if len(body.actions)>12:raise HTTPException(413,"Maximum 12 actions per plan")
+ allowed={"launch_app","desktop_hotkey","desktop_type","desktop_scroll","browser_navigate","browser_fill","browser_click","desktop_click"}
+ # Validate the complete plan before executing anything, avoiding partial runs on invalid steps.
+ for action in body.actions:
+  if action.action not in allowed:raise HTTPException(400,"Action not allowlisted for agent plans: "+action.action)
+  if action.action=="desktop_hotkey" and not action.keys:raise HTTPException(400,"Hotkey step requires keys")
+  if action.action in {"browser_navigate"} and not action.target.startswith(("http://","https://")):raise HTTPException(400,"Browser URL must start with http(s)")
+  if action.action in {"browser_fill","browser_click"} and not action.selector:raise HTTPException(400,"Browser selector is required")
  results=[]
  for action in body.actions:
-  if action.action not in {"launch_app","desktop_hotkey","desktop_type","desktop_scroll","browser_navigate","browser_fill","browser_click","desktop_click"}:raise HTTPException(400,"Action not allowlisted for agent plans")
   action.approved=True
   results.append(await worker_action(action))
  return {"ok":True,"results":results}
