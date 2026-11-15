@@ -54,6 +54,54 @@ class WorkerAction(BaseModel):
  amount:int=0
  keys:list[str]=[]
 
+
+class ComputerInspectIn(BaseModel):
+ image_base64:str
+ question:str="Describe the current screen and identify visible controls, status, and likely next safe action."
+class ComputerStepIn(BaseModel):
+ action:WorkerAction
+ inspect_after:bool=True
+ approved:bool=False
+
+async def vision_call(image_base64,question):
+ # Prefer Gemini's native multimodal API; then OpenAI-compatible vision providers.
+ key=os.getenv("GEMINI_API_KEY","");model=os.getenv("VISION_MODEL",os.getenv("GEMINI_MODEL","gemini-2.5-flash"))
+ if key:
+  async with httpx.AsyncClient(timeout=90) as c:
+   url=f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+   r=await c.post(url,json={"contents":[{"parts":[{"text":question},{"inline_data":{"mime_type":"image/png","data":image_base64}}]}],"generationConfig":{"temperature":0.2}})
+   r.raise_for_status();return r.json()["candidates"][0]["content"]["parts"][0]["text"],model
+ for p in providers():
+  if p.get("native"):continue
+  async with httpx.AsyncClient(timeout=90) as c:
+   r=await c.post(p["base"]+"/chat/completions",headers={"Authorization":"Bearer "+p["key"]},json={"model":os.getenv("VISION_MODEL",p["model"]),"messages":[{"role":"user","content":[{"type":"text","text":question},{"type":"image_url","image_url":{"url":"data:image/png;base64,"+image_base64}}]}],"temperature":0.2})
+   r.raise_for_status();return r.json()["choices"][0]["message"]["content"],p["model"]
+ raise HTTPException(503,"Vision requires GEMINI_API_KEY or an OpenAI-compatible vision provider in .env")
+@app.post("/api/computer/inspect")
+async def computer_inspect(body:ComputerInspectIn):
+ import base64
+ if len(body.image_base64)>12_000_000:raise HTTPException(413,"Screenshot payload too large")
+ try:base64.b64decode(body.image_base64,validate=True)
+ except Exception:raise HTTPException(400,"image_base64 must be valid base64")
+ try:
+  answer,model=await vision_call(body.image_base64,body.question[:3000])
+  event("computer_screen_inspected",{"model":model,"question":body.question[:250],"answer":answer[:1200]})
+  return {"ok":True,"model":model,"analysis":answer}
+ except HTTPException:raise
+ except Exception as e:raise HTTPException(502,"Vision analysis failed: "+str(e)[:300])
+@app.post("/api/computer/step")
+async def computer_step(body:ComputerStepIn):
+ if not body.approved:raise HTTPException(403,"Human approval required for action")
+ # Execute one explicitly approved action, then capture fresh screen for verification.
+ body.action.approved=True
+ result=await worker_action(body.action)
+ screen=None
+ if body.inspect_after:
+  try:screen=await worker_action(WorkerAction(action="desktop_screenshot",approved=True))
+  except Exception as e:screen={"ok":False,"error":str(e)[:250]}
+ event("computer_step",{"action":body.action.action,"result":result,"screenshot_captured":bool(screen and screen.get("ok"))})
+ return {"ok":True,"action_result":result,"screenshot":screen}
+
 class ComputerPlanIn(BaseModel):
  goal:str
 class ComputerExecuteIn(BaseModel):
