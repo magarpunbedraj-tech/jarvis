@@ -23,15 +23,18 @@ class Toggle(BaseModel):enabled:bool
 async def get_schedules():return load()
 @router.post("")
 async def add(s:ScheduleIn):
+ from .main import event
  a=load();item={"id":str(uuid.uuid4())[:8],**s.model_dump(),"created":time.time(),"last_run_date":None}
  a.append(item);save(a);event("schedule_created",item);return item
 @router.patch("/{sid}")
 async def toggle(sid:str,b:Toggle):
+ from .main import event
  a=load();s=next((x for x in a if x["id"]==sid),None)
  if not s:raise HTTPException(404,"Schedule not found")
  s["enabled"]=b.enabled;save(a);event("schedule_toggled",{"id":sid,"enabled":b.enabled});return s
 @router.delete("/{sid}")
 async def delete(sid:str):
+ from .main import event
  a=load();n=[x for x in a if x["id"]!=sid]
  if len(n)==len(a):raise HTTPException(404,"Schedule not found")
  save(n);return {"ok":True}
@@ -47,7 +50,7 @@ async def run_due():
    a=load();target=next((x for x in a if x["id"]==s["id"]),None)
    if target:target["last_run_date"]=today;save(a)
    event("schedule_run",{"id":s["id"],"name":s["name"],"answer":result["answer"][:2000]})
-  except Exception as e:event("schedule_error",{"id":s["id"],"error":str(e)[:500]})
+  except Exception as e:\n   a=load();target=next((x for x in a if x["id"]==s["id"]),None)\n   if target:target["last_run_date"]=today;save(a)\n   event("schedule_error",{"id":s["id"],"error":str(e)[:500]})
 def scheduler_loop():
  import asyncio
  while True:
