@@ -50,7 +50,10 @@ async def run_due():
    a=load();target=next((x for x in a if x["id"]==s["id"]),None)
    if target:target["last_run_date"]=today;save(a)
    event("schedule_run",{"id":s["id"],"name":s["name"],"answer":result["answer"][:2000]})
-  except Exception as e:\n   a=load();target=next((x for x in a if x["id"]==s["id"]),None)\n   if target:target["last_run_date"]=today;save(a)\n   event("schedule_error",{"id":s["id"],"error":str(e)[:500]})
+  except Exception as e:
+   a=load();target=next((x for x in a if x["id"]==s["id"]),None)
+   if target:target["last_run_date"]=today;save(a)
+   event("schedule_error",{"id":s["id"],"error":str(e)[:500]})
 def scheduler_loop():
  import asyncio
  while True:
