@@ -43,6 +43,12 @@ class AgentMessage(BaseModel):
  to_agent:str
  content:str
  task_id:str|None=None
+class WorkerAction(BaseModel):
+ action:str
+ target:str=""
+ selector:str=""
+ content:str=""
+ approved:bool=False
 
 def read_tasks():
  try:return json.loads(TASKS_FILE.read_text(encoding="utf8"))
@@ -135,6 +141,18 @@ async def agent_message(body:AgentMessage):
  return event("agent_message",body.model_dump())
 @app.get("/api/events")
 async def get_events():return events()
+@app.post("/api/worker/action")
+async def worker_action(body:WorkerAction):
+ if not body.approved:raise HTTPException(403,"Confirm the exact local action before execution")
+ token=os.getenv("WORKER_TOKEN","")
+ if not token:raise HTTPException(503,"WORKER_TOKEN is not configured in .env")
+ payload={**body.model_dump(),"token":token}
+ try:
+  async with httpx.AsyncClient(timeout=45) as client:
+   r=await client.post("http://127.0.0.1:"+os.getenv("WORKER_PORT","8788")+"/action",json=payload)
+   if r.status_code>=400:raise HTTPException(r.status_code,r.text[:800])
+   return r.json()
+ except httpx.RequestError as e:raise HTTPException(503,"Local worker unavailable. Start worker-start.bat. "+str(e)[:200])
 @app.get("/api/config")
 async def config():return {"provider":"cloud" if providers() else "ollama","model":providers()[0]["model"] if providers() else os.getenv("OLLAMA_MODEL","qwen2.5:7b"),"desktop_control":False}
 @app.post("/api/orchestrate")
