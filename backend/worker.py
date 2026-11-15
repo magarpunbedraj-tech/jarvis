@@ -7,13 +7,14 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 load_dotenv()
-app=FastAPI(title="Jarvis Local Worker",version="0.2.0")
+app=FastAPI(title="Jarvis Local Worker",version="0.3.0")
 TOKEN=os.getenv("WORKER_TOKEN","")
 HOST=os.getenv("WORKER_HOST","127.0.0.1")
 PORT=int(os.getenv("WORKER_PORT","8788"))
 ROOT=Path(__file__).resolve().parent.parent
 _browser=None
 _page=None
+_pw=None
 
 def auth(token:str):
  if not TOKEN or token!=TOKEN: raise HTTPException(401,"Invalid worker token")
@@ -23,19 +24,52 @@ def safe_url(url):
  if not url.startswith(("https://","http://")): raise HTTPException(400,"Only http(s) URLs allowed")
 class Action(BaseModel):
  token:str
- action:Literal["open_url","open_folder","open_app","write_file","read_file","list_folder","browse_page","browser_start","browser_navigate","browser_fill","browser_click","browser_text","browser_close"]
+ action:Literal["open_url","open_folder","open_app","write_file","read_file","list_folder","browse_page","browser_start","browser_navigate","browser_fill","browser_click","browser_text","browser_close","list_apps","launch_app","desktop_screenshot","desktop_click","desktop_type","desktop_hotkey","desktop_scroll"]
  target:str=""
  selector:str=""
  content:str=""
  approved:bool=False
+ x:int|None=None
+ y:int|None=None
+ amount:int=0
+ keys:list[str]=[]
 
 @app.get("/health")
 async def health():return {"ok":True,"worker":"local","version":"0.2.0","host":HOST,"port":PORT,"approval_required":True,"browser_open":_page is not None}
 
 @app.post("/action")
 async def action(a:Action):
- global _browser,_page
+ global _browser,_page,_pw
  auth(a.token);approved(a)
+ if a.action=="list_apps":
+  folders=[Path(os.getenv("APPDATA",""))/"Microsoft/Windows/Start Menu/Programs",Path(os.getenv("PROGRAMDATA","C:/ProgramData"))/"Microsoft/Windows/Start Menu/Programs"]
+  apps=[]
+  for folder in folders:
+   if folder.exists():
+    apps.extend({"name":p.stem,"path":str(p)} for p in folder.rglob("*.lnk"))
+  return {"ok":True,"apps":sorted(apps,key=lambda x:x["name"].lower())[:400]}
+ if a.action=="launch_app":
+  folders=[Path(os.getenv("APPDATA",""))/"Microsoft/Windows/Start Menu/Programs",Path(os.getenv("PROGRAMDATA","C:/ProgramData"))/"Microsoft/Windows/Start Menu/Programs"]
+  match=next((p for folder in folders if folder.exists() for p in folder.rglob("*.lnk") if p.stem.lower()==a.target.lower()),None)
+  if not match:raise HTTPException(404,"App shortcut not found; list apps first")
+  os.startfile(str(match));return {"ok":True,"launched":match.stem}
+ if a.action.startswith("desktop_"):
+  import pyautogui as pg
+  if a.action=="desktop_screenshot":
+   import base64,io
+   buf=io.BytesIO();pg.screenshot().save(buf,format="PNG")
+   return {"ok":True,"image_base64":base64.b64encode(buf.getvalue()).decode(),"width":pg.size().width,"height":pg.size().height}
+  if a.action=="desktop_click":
+   if a.x is None or a.y is None or not (0<=a.x<pg.size().width and 0<=a.y<pg.size().height):raise HTTPException(400,"Valid x/y screen coordinates required")
+   pg.click(a.x,a.y);return {"ok":True,"clicked":[a.x,a.y]}
+  if a.action=="desktop_type":
+   if len(a.content)>5000:raise HTTPException(413,"Text max 5000")
+   pg.write(a.content,interval=0.02);return {"ok":True,"typed":len(a.content)}
+  if a.action=="desktop_hotkey":
+   allowed={"ctrl","alt","shift","win","enter","tab","esc","space","backspace","delete","up","down","left","right","home","end","pageup","pagedown","f1","f2","f3","f4","f5","f6","f7","f8","f9","f10","f11","f12","a","c","v","x","z","y","s","w","t","r","l","d"}
+   if not a.keys or any(k.lower() not in allowed for k in a.keys):raise HTTPException(400,"Hotkey not allowlisted")
+   pg.hotkey(*[k.lower() for k in a.keys]);return {"ok":True,"keys":a.keys}
+  if a.action=="desktop_scroll":pg.scroll(max(-20,min(20,a.amount)));return {"ok":True,"scroll":a.amount}
  if a.action=="browse_page":
   safe_url(a.target)
   try:
@@ -55,6 +89,7 @@ async def action(a:Action):
   except Exception as e:raise HTTPException(500,"Browser launch failed. Run playwright install chromium. "+str(e)[:250])
  if a.action=="browser_close":
   if _browser:await _browser.close();_browser=None;_page=None
+  if _pw:await _pw.stop();_pw=None
   return {"ok":True,"message":"Browser closed"}
  if a.action=="browser_navigate":
   if not _page:raise HTTPException(409,"Start browser session first")
