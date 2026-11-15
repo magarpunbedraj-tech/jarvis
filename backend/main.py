@@ -59,7 +59,8 @@ class ComputerPlanIn(BaseModel):
 class ComputerExecuteIn(BaseModel):
  actions:list[WorkerAction]
  approved:bool=False
-\ndef read_tasks():
+
+def read_tasks():
  try:return json.loads(TASKS_FILE.read_text(encoding="utf8"))
  except:return []
 def write_tasks(x):TASKS_FILE.write_text(json.dumps(x,indent=2,ensure_ascii=False),encoding="utf8")
