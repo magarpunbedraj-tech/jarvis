@@ -49,6 +49,10 @@ class WorkerAction(BaseModel):
  selector:str=""
  content:str=""
  approved:bool=False
+ x:int|None=None
+ y:int|None=None
+ amount:int=0
+ keys:list[str]=[]
 
 def read_tasks():
  try:return json.loads(TASKS_FILE.read_text(encoding="utf8"))
