@@ -18,7 +18,7 @@ def auth(token:str):
 
 class Action(BaseModel):
  token:str
- action:Literal["open_url","open_folder","open_app","write_file","read_file","list_folder"]
+ action:Literal["open_url","open_folder","open_app","write_file","read_file","list_folder","browse_page"]
  target:str=""
  content:str=""
  approved:bool=False
