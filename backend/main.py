@@ -7,14 +7,14 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field\nfrom .scheduler import router as schedule_router, start_scheduler
 
 load_dotenv()
 ROOT=Path(__file__).resolve().parent.parent
 DATA=ROOT/"data"; DATA.mkdir(exist_ok=True)
 TASKS_FILE=DATA/"tasks.json"; EVENTS_FILE=DATA/"events.jsonl"
 app=FastAPI(title="Jarvis AI Agency",version="0.2.0")
-app.mount("/static",StaticFiles(directory=str(ROOT/"web")),name="static")
+app.mount("/static",StaticFiles(directory=str(ROOT/"web")),name="static")\napp.include_router(schedule_router)\n@app.on_event("startup")\ndef startup(): start_scheduler()
 
 AGENTS={
  "manager":{"name":"Agency Manager","role":"Break goals into tasks, choose specialists, coordinate, challenge weak results and synthesize."},
