@@ -64,7 +64,13 @@ async def action(a:Action):
    pg.click(a.x,a.y);return {"ok":True,"clicked":[a.x,a.y]}
   if a.action=="desktop_type":
    if len(a.content)>5000:raise HTTPException(413,"Text max 5000")
-   pg.write(a.content,interval=0.02);return {"ok":True,"typed":len(a.content)}
+   # Clipboard paste supports Nepali/Unicode; pyautogui.write is ASCII-only.
+   import pyperclip
+   previous=pyperclip.paste()
+   try:
+    pyperclip.copy(a.content);pg.hotkey("ctrl","v")
+   finally:pyperclip.copy(previous)
+   return {"ok":True,"typed":len(a.content),"method":"clipboard_paste"}
   if a.action=="desktop_hotkey":
    allowed={"ctrl","alt","shift","win","enter","tab","esc","space","backspace","delete","up","down","left","right","home","end","pageup","pagedown","f1","f2","f3","f4","f5","f6","f7","f8","f9","f10","f11","f12","a","c","v","x","z","y","s","w","t","r","l","d"}
    if not a.keys or any(k.lower() not in allowed for k in a.keys):raise HTTPException(400,"Hotkey not allowlisted")
