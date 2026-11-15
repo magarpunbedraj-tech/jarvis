@@ -53,5 +53,11 @@ Example values are placeholders in .env.example. Don't assume a model is free ju
 
 Worker is bound to 127.0.0.1 by default and only accepts an allowlisted action with the secret token and explicit approval. File operations are confined to this repository folder; app launches are limited to Notepad/Calculator/Paint. Browser interaction can affect real websites: verify URL, selector, and data before approving. Never approve payment, account deletion, sending messages, purchases, or other irreversible actions without carefully reviewing the exact operation. This is not a fully autonomous desktop agent and does not bypass logins, CAPTCHA, MFA, or website protections.
 
+## Full-PC automation (v0.4)
+- pyautogui desktop screenshot, coordinate click, keyboard typing/hotkeys, and scroll operate across the active Windows desktop, not only a built-in app.
+- list_apps / launch_app scan Start Menu shortcuts for installed app launchers. Apps installed without shortcuts may not appear.
+- AI Computer Agent proposes workflows; dashboard displays proposal and asks for confirmation before allowlisted execution. It is not autonomous visual reasoning: screenshot is shown to the operator, who chooses coordinates.
+- Visible Chromium supports navigation, CSS-selector fill/click/read; each browser or desktop interaction requires approval.
+
 ## Honest capability boundaries
 Multi-agent planning still uses LLM-generated plans and can make mistakes. Scheduled jobs run locally only while the API process is open and need a configured provider; provider quotas and availability are external. The worker/dashboard are not publicly hosted and the laptop must remain awake and connected for local actions.
