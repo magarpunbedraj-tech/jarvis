@@ -1,31 +1,33 @@
 from __future__ import annotations
-import os, json, asyncio, uuid, time
+import os, json, uuid, time, asyncio
 from pathlib import Path
-from typing import Any
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field\nfrom .scheduler import router as schedule_router, start_scheduler
-
+from pydantic import BaseModel
 load_dotenv()
 ROOT=Path(__file__).resolve().parent.parent
 DATA=ROOT/"data"; DATA.mkdir(exist_ok=True)
 TASKS_FILE=DATA/"tasks.json"; EVENTS_FILE=DATA/"events.jsonl"
-app=FastAPI(title="Jarvis AI Agency",version="0.2.0")
-app.mount("/static",StaticFiles(directory=str(ROOT/"web")),name="static")\napp.include_router(schedule_router)\n@app.on_event("startup")\ndef startup(): start_scheduler()
+app=FastAPI(title="Jarvis AI Agency",version="0.3.0")
+app.mount("/static",StaticFiles(directory=str(ROOT/"web")),name="static")
+from .scheduler import router as schedule_router, start_scheduler
+app.include_router(schedule_router)
+@app.on_event("startup")
+def startup(): start_scheduler()
 
 AGENTS={
- "manager":{"name":"Agency Manager","role":"Break goals into tasks, choose specialists, coordinate, challenge weak results and synthesize."},
- "research":{"name":"Research Agent","role":"Research, evidence, comparisons, assumptions and source-aware analysis."},
- "coder":{"name":"Coding Agent","role":"Software architecture, code, debugging, tests and implementation."},
- "browser":{"name":"Browser Agent","role":"Web research plans, website analysis and browser workflow design; no browser execution in this MVP."},
- "business":{"name":"Business Agent","role":"Business strategy, operations, marketing, product and revenue plans."},
- "computer":{"name":"Computer Agent","role":"Windows workflow planning; never claim desktop actions actually executed."},
- "qa":{"name":"QA Agent","role":"Critique, fact-check, test planning, risk analysis and acceptance criteria."},
- "memory":{"name":"Memory Agent","role":"Summarize useful task context, decisions and durable project notes."},
- "voice":{"name":"Voice Agent","role":"Voice UX, transcription and speech workflow design."}
+ "manager":{"name":"Agency Manager","role":"Plan tasks, delegate, coordinate and synthesize verified results."},
+ "research":{"name":"Research Agent","role":"Research, comparisons, evidence and uncertainty."},
+ "coder":{"name":"Coding Agent","role":"Software design, coding, debugging and tests."},
+ "browser":{"name":"Browser Agent","role":"Web research and browser workflow analysis; don't claim browser actions ran."},
+ "business":{"name":"Business Agent","role":"Business strategy, marketing, operations and revenue."},
+ "computer":{"name":"Computer Agent","role":"Windows workflows; don't claim actions ran without local worker."},
+ "qa":{"name":"QA Agent","role":"Review outputs, challenge assumptions and identify gaps."},
+ "memory":{"name":"Memory Agent","role":"Summarize project context, decisions and task notes."},
+ "voice":{"name":"Voice Agent","role":"Voice UX, speech and transcription workflows."}
 }
 class ChatIn(BaseModel):
  message:str
@@ -43,9 +45,9 @@ class AgentMessage(BaseModel):
  task_id:str|None=None
 
 def read_tasks():
- try:return json.loads(TASKS_FILE.read_text())
+ try:return json.loads(TASKS_FILE.read_text(encoding="utf8"))
  except:return []
-def write_tasks(x):TASKS_FILE.write_text(json.dumps(x,indent=2,ensure_ascii=False))
+def write_tasks(x):TASKS_FILE.write_text(json.dumps(x,indent=2,ensure_ascii=False),encoding="utf8")
 def event(kind,payload):
  row={"id":str(uuid.uuid4()),"time":time.time(),"kind":kind,**payload}
  with EVENTS_FILE.open("a",encoding="utf8") as f:f.write(json.dumps(row,ensure_ascii=False)+"\n")
@@ -60,63 +62,52 @@ def events(limit=150):
 
 def providers():
  p=[]
- # OpenAI-compatible providers, ordered by preference; each is optional.
  for name,base,key,model in [
   ("primary",os.getenv("AI_BASE_URL",""),os.getenv("AI_API_KEY",""),os.getenv("AI_MODEL","")),
   ("groq",os.getenv("GROQ_BASE_URL","https://api.groq.com/openai/v1"),os.getenv("GROQ_API_KEY",""),os.getenv("GROQ_MODEL","")),
-  ("openrouter",os.getenv("OPENROUTER_BASE_URL","https://openrouter.ai/api/v1"),os.getenv("OPENROUTER_API_KEY",""),os.getenv("OPENROUTER_MODEL","")),
- ]:
+  ("openrouter",os.getenv("OPENROUTER_BASE_URL","https://openrouter.ai/api/v1"),os.getenv("OPENROUTER_API_KEY",""),os.getenv("OPENROUTER_MODEL",""))]:
   if base and key and model:p.append({"name":name,"base":base.rstrip("/"),"key":key,"model":model})
- # Gemini native API, optional and tried after compatible providers.
  if os.getenv("GEMINI_API_KEY") and os.getenv("GEMINI_MODEL"):
   p.append({"name":"gemini","key":os.getenv("GEMINI_API_KEY"),"model":os.getenv("GEMINI_MODEL"),"native":True})
  return p
-
 async def call_provider(p,messages):
  async with httpx.AsyncClient(timeout=180) as client:
   if p.get("native"):
-   prompt="\n\n".join(("SYSTEM: "+m["content"] if m["role"]=="system" else m["role"].upper()+": "+m["content"]) for m in messages)
+   prompt="\n\n".join(m["role"].upper()+": "+m["content"] for m in messages)
    url=f"https://generativelanguage.googleapis.com/v1beta/models/{p['model']}:generateContent?key={p['key']}"
    r=await client.post(url,json={"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"temperature":0.3}})
    r.raise_for_status();return r.json()["candidates"][0]["content"]["parts"][0]["text"]
   r=await client.post(p["base"]+"/chat/completions",headers={"Authorization":"Bearer "+p["key"]},json={"model":p["model"],"messages":messages,"temperature":0.3,"stream":False})
   r.raise_for_status();return r.json()["choices"][0]["message"]["content"]
-
 async def llm(messages):
  errors=[]
  for p in providers():
   try:
    answer=await call_provider(p,messages);event("provider_used",{"provider":p["name"],"model":p["model"]});return answer
   except Exception as e:
-   errors.append(p["name"]+": "+str(e)[:220]);event("provider_failed",{"provider":p["name"],"error":str(e)[:300]})
- # Ollama is optional fallback
+   errors.append(p["name"]+": "+str(e)[:200]);event("provider_failed",{"provider":p["name"],"error":str(e)[:250]})
  try:
-  base=os.getenv("OLLAMA_BASE_URL","http://localhost:11434").rstrip("/")
-  model=os.getenv("OLLAMA_MODEL","qwen2.5:7b")
   async with httpx.AsyncClient(timeout=180) as c:
-   r=await c.post(base+"/v1/chat/completions",json={"model":model,"messages":messages,"temperature":0.3})
+   r=await c.post(os.getenv("OLLAMA_BASE_URL","http://localhost:11434").rstrip()+"/v1/chat/completions",json={"model":os.getenv("OLLAMA_MODEL","qwen2.5:7b"),"messages":messages})
    r.raise_for_status();return r.json()["choices"][0]["message"]["content"]
- except Exception as e:errors.append("ollama: "+str(e)[:180])
- raise RuntimeError("No AI provider succeeded. Configure one free API key in .env. "+" | ".join(errors))
-
+ except Exception as e:errors.append("ollama: "+str(e)[:160])
+ raise RuntimeError("No AI provider succeeded. Configure a free API key in .env. "+" | ".join(errors))
 async def agent_run(agent,prompt,task_id=None,shared_context=""):
  info=AGENTS.get(agent,AGENTS["manager"])
  event("agent_started",{"agent":agent,"task_id":task_id,"prompt":prompt[:500]})
- system=f"You are {info['name']}. Role: {info['role']}\nYou are one member of a multi-agent agency. Be concise, specific, transparent about uncertainty. Never claim an external action was executed unless a tool verified it."
- try:answer=await llm([{"role":"system","content":system},{"role":"user","content":"Task: "+prompt+"\nShared agency context and peer messages: "+shared_context}])
+ system=f"You are {info['name']}. Role: {info['role']}\nBe specific and honest. Never claim an external action ran unless verified."
+ try:answer=await llm([{"role":"system","content":system},{"role":"user","content":"Task: "+prompt+"\nShared agency context/peer messages: "+shared_context}])
  except Exception as e:answer="AI provider error: "+str(e)
- event("agent_completed",{"agent":agent,"task_id":task_id,"result":answer[:2500]})
+ event("agent_completed",{"agent":agent,"task_id":task_id,"result":answer[:2200]})
  return answer
-
 @app.get("/",response_class=HTMLResponse)
-async def home():return (ROOT/"web"/"index.html").read_text()
+async def home():return (ROOT/"web"/"index.html").read_text(encoding="utf8")
 @app.get("/api/health")
 async def health():return {"ok":True,"app":"Jarvis AI Agency","agents":list(AGENTS),"providers_configured":len(providers())}
 @app.get("/api/agents")
 async def agents():return AGENTS
 @app.get("/api/providers")
-async def provider_status():
- return {"configured":[{"name":p["name"],"model":p["model"]} for p in providers()],"fallback":"Ollama"}
+async def provider_status():return {"configured":[{"name":p["name"],"model":p["model"]} for p in providers()],"fallback":"Ollama"}
 @app.get("/api/tasks")
 async def tasks():return read_tasks()
 @app.post("/api/tasks")
@@ -129,8 +120,8 @@ async def run_task(task_id:str):
  if not t:raise HTTPException(404,"Task not found")
  t["status"]="running";write_tasks(a)
  try:
-  result=await orchestrate(ChatIn(message=t["title"]+"\n"+t["description"],task_id=task_id))
-  t["result"]=result["answer"];t["agent_results"]=result["results"];t["status"]="done"
+  r=await orchestrate(ChatIn(message=t["title"]+"\n"+t["description"],task_id=task_id))
+  t["result"]=r["answer"];t["agent_results"]=r["results"];t["status"]="done"
  except Exception as e:t["result"]=str(e);t["status"]="error"
  t["finished"]=time.time();write_tasks(a);return t
 @app.post("/api/chat")
@@ -145,30 +136,25 @@ async def agent_message(body:AgentMessage):
 @app.get("/api/events")
 async def get_events():return events()
 @app.get("/api/config")
-async def config():
- return {"provider":"cloud" if providers() else "ollama","model":providers()[0]["model"] if providers() else os.getenv("OLLAMA_MODEL","qwen2.5:7b"),"desktop_control":False}
-
+async def config():return {"provider":"cloud" if providers() else "ollama","model":providers()[0]["model"] if providers() else os.getenv("OLLAMA_MODEL","qwen2.5:7b"),"desktop_control":False}
 @app.post("/api/orchestrate")
 async def orchestrate(body:ChatIn):
- # Manager creates a JSON delegation plan; safe allowlist and max 5 agents.
- planner="Create a task plan as JSON only: {steps:[{agent:research|coder|browser|business|computer|qa|memory|voice,task:string}]}. Choose 2-5 useful distinct specialists. Do not include manager. Goal: "+body.message
+ planner="Return JSON only {steps:[{agent:research|coder|browser|business|computer|qa|memory|voice,task:string}]}. Choose 2-5 distinct specialists for goal: "+body.message
  try:
-  raw=await llm([{"role":"system","content":"You are a project manager. Return valid JSON only, no markdown."},{"role":"user","content":planner}])
+  raw=await llm([{"role":"system","content":"Project manager. Valid JSON only, no markdown."},{"role":"user","content":planner}])
   plan=json.loads(raw[raw.find("{"):raw.rfind("}")+1]);steps=plan.get("steps",[])[:5]
  except Exception as e:
-  event("planner_fallback",{"error":str(e)[:300]})
-  steps=[{"agent":"research","task":"Analyze requirements and risks for: "+body.message},{"agent":"coder","task":"Propose concrete solution/implementation for: "+body.message},{"agent":"qa","task":"Review likely solution, identify gaps and safe next steps for: "+body.message}]
+  event("planner_fallback",{"error":str(e)[:250]})
+  steps=[{"agent":"research","task":"Analyze requirements and risks: "+body.message},{"agent":"coder","task":"Propose implementation: "+body.message},{"agent":"qa","task":"Review solution and gaps: "+body.message}]
  context="USER GOAL: "+body.message;results=[];seen=set()
  for step in steps:
   agent=step.get("agent","research")
   if agent not in AGENTS or agent=="manager" or agent in seen:continue
   seen.add(agent);task=str(step.get("task",body.message))
   event("agent_handoff",{"from_agent":"manager","to_agent":agent,"task_id":body.task_id,"content":task})
-  out=await agent_run(agent,task,body.task_id,context)
-  results.append({"agent":agent,"task":task,"result":out})
-  # Each specialist's output is shared with the next agent (peer-to-peer via manager bus).
+  out=await agent_run(agent,task,body.task_id,context);results.append({"agent":agent,"task":task,"result":out})
   context+="\n\n[AGENCY MESSAGE "+agent+" -> ALL PEERS] "+out
   event("agent_message",{"from_agent":agent,"to_agent":"agency_shared_context","task_id":body.task_id,"content":out})
- final=await agent_run("manager","Evaluate peer outputs, resolve contradictions, state remaining unverified actions, and deliver one useful final response.",body.task_id,context)
+ final=await agent_run("manager","Evaluate peer outputs, resolve contradictions, state unverified actions, and deliver a useful answer.",body.task_id,context)
  event("orchestration_completed",{"task_id":body.task_id,"agents":[x["agent"] for x in results]})
  return {"plan":steps,"results":results,"answer":final}
