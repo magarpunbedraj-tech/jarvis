@@ -48,7 +48,7 @@ def read_tasks():
 def write_tasks(x):TASKS_FILE.write_text(json.dumps(x,indent=2,ensure_ascii=False))
 def event(kind,payload):
  row={"id":str(uuid.uuid4()),"time":time.time(),"kind":kind,**payload}
- with EVENTS_FILE.open("a",encoding="utf8") as f:f.write(json.dumps(row,ensure_ascii=False)+"\\n")
+ with EVENTS_FILE.open("a",encoding="utf8") as f:f.write(json.dumps(row,ensure_ascii=False)+"\n")
  return row
 def events(limit=150):
  if not EVENTS_FILE.exists():return []
@@ -75,7 +75,7 @@ def providers():
 async def call_provider(p,messages):
  async with httpx.AsyncClient(timeout=180) as client:
   if p.get("native"):
-   prompt="\\n\\n".join(("SYSTEM: "+m["content"] if m["role"]=="system" else m["role"].upper()+": "+m["content"]) for m in messages)
+   prompt="\n\n".join(("SYSTEM: "+m["content"] if m["role"]=="system" else m["role"].upper()+": "+m["content"]) for m in messages)
    url=f"https://generativelanguage.googleapis.com/v1beta/models/{p['model']}:generateContent?key={p['key']}"
    r=await client.post(url,json={"contents":[{"parts":[{"text":prompt}]}],"generationConfig":{"temperature":0.3}})
    r.raise_for_status();return r.json()["candidates"][0]["content"]["parts"][0]["text"]
@@ -102,8 +102,8 @@ async def llm(messages):
 async def agent_run(agent,prompt,task_id=None,shared_context=""):
  info=AGENTS.get(agent,AGENTS["manager"])
  event("agent_started",{"agent":agent,"task_id":task_id,"prompt":prompt[:500]})
- system=f"You are {info['name']}. Role: {info['role']}\\nYou are one member of a multi-agent agency. Be concise, specific, transparent about uncertainty. Never claim an external action was executed unless a tool verified it."
- try:answer=await llm([{"role":"system","content":system},{"role":"user","content":"Task: "+prompt+"\\nShared agency context and peer messages: "+shared_context}])
+ system=f"You are {info['name']}. Role: {info['role']}\nYou are one member of a multi-agent agency. Be concise, specific, transparent about uncertainty. Never claim an external action was executed unless a tool verified it."
+ try:answer=await llm([{"role":"system","content":system},{"role":"user","content":"Task: "+prompt+"\nShared agency context and peer messages: "+shared_context}])
  except Exception as e:answer="AI provider error: "+str(e)
  event("agent_completed",{"agent":agent,"task_id":task_id,"result":answer[:2500]})
  return answer
@@ -129,7 +129,7 @@ async def run_task(task_id:str):
  if not t:raise HTTPException(404,"Task not found")
  t["status"]="running";write_tasks(a)
  try:
-  result=await orchestrate(ChatIn(message=t["title"]+"\\n"+t["description"],task_id=task_id))
+  result=await orchestrate(ChatIn(message=t["title"]+"\n"+t["description"],task_id=task_id))
   t["result"]=result["answer"];t["agent_results"]=result["results"];t["status"]="done"
  except Exception as e:t["result"]=str(e);t["status"]="error"
  t["finished"]=time.time();write_tasks(a);return t
@@ -167,7 +167,7 @@ async def orchestrate(body:ChatIn):
   out=await agent_run(agent,task,body.task_id,context)
   results.append({"agent":agent,"task":task,"result":out})
   # Each specialist's output is shared with the next agent (peer-to-peer via manager bus).
-  context+="\\n\\n[AGENCY MESSAGE "+agent+" -> ALL PEERS] "+out
+  context+="\n\n[AGENCY MESSAGE "+agent+" -> ALL PEERS] "+out
   event("agent_message",{"from_agent":agent,"to_agent":"agency_shared_context","task_id":body.task_id,"content":out})
  final=await agent_run("manager","Evaluate peer outputs, resolve contradictions, state remaining unverified actions, and deliver one useful final response.",body.task_id,context)
  event("orchestration_completed",{"task_id":body.task_id,"agents":[x["agent"] for x in results]})
