@@ -121,3 +121,25 @@ async def get_events(): return events()
 @app.get("/api/config")
 async def config():
  return {"provider":"cloud" if os.getenv("AI_BASE_URL") and os.getenv("AI_API_KEY") else "ollama","model":os.getenv("AI_MODEL") or os.getenv("OLLAMA_MODEL","qwen2.5:14b"),"desktop_control":os.getenv("ENABLE_DESKTOP_CONTROL","false").lower()=="true"}
+
+
+@app.post("/api/orchestrate")
+async def orchestrate(body:ChatIn):
+ plan_prompt='Return JSON only with steps array; each step has agent (coder/browser/computer/research/voice/memory) and task. Select 1-3 specialists. Request: '+body.message
+ try:
+  raw=await llm([{"role":"system","content":"Careful planner. Do not select computer for sensitive/destructive actions."},{"role":"user","content":plan_prompt}])
+  start=raw.find("{"); end=raw.rfind("}")+1; plan=json.loads(raw[start:end]); steps=plan.get("steps",[])[:3]
+ except Exception:
+  steps=[{"agent":"research","task":body.message},{"agent":"coder","task":"Give implementation or actionable solution for: "+body.message}]
+ context="User goal: "+body.message; results=[]
+ for step in steps:
+  agent=step.get("agent","research")
+  if agent not in AGENTS or agent=="manager": continue
+  task=step.get("task",body.message)
+  event("agent_handoff",{"from_agent":"manager","to_agent":agent,"task_id":body.task_id,"content":task})
+  out=await agent_run(agent,task,body.task_id,context)
+  results.append({"agent":agent,"task":task,"result":out})
+  context+="\n\n"+agent+" result: "+out
+  event("agent_message",{"from_agent":agent,"to_agent":"manager","task_id":body.task_id,"content":out})
+ final=await agent_run("manager","Synthesize specialist results into one verified answer.",body.task_id,context)
+ return {"plan":steps,"results":results,"answer":final}
